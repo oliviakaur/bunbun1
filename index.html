@@ -1,0 +1,1729 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  Template Name   : BunBun Vanilla HTML + JS CSR Frontend
+  Version         : v1.2.0
+  API Server      : https://bunbunserver.my.id
+  Pages Supported : 1. Homepage          (/ or /?page=home)
+                    2. Category Page     (/?category=<db>)
+                    3. Single Article    (/?category=<db>&slug=<slug>)
+                       + Non-Priority Related Posts (GET /api/articles/random?limit=10)
+                       + Non-Priority Related Links (GET /api/articles/random?limit=5 + GET /api/domains/status)
+                       + No categories listing on Single Article page
+                    4. Sitemap Page      (/?page=sitemap)
+                       + HTML Category & Article Directory + XML Sitemap / Atom 1.0 Feed Endpoints
+  Googlebot Order : 1. Canonical URL, Title, Meta & Open Graph set synchronously at start of <head>
+                    2. Priority #1 API Fetch initiated in <head> (Article Text & Images first)
+                    3. Zero-blocking inline Tailwind utility CSS (replaces runtime Play CDN)
+                    4. Crawl-optimized Single Article Images (Schema.org ImageObject microdata +
+                       rich JSON-LD ImageObject array + zero-network-request fallback that preserves
+                       original img[src] for Googlebot-Image and prevents infinite HTTP retry loops)
+                    5. Related Posts (limit=10) & Related Links fetched with low priority ONLY AFTER
+                       primary Article Text & Images are mounted in the DOM.
+  ============================================================================
+-->
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- ===================================================================== -->
+  <!-- 1. DNS PRECONNECT & PREFETCH (API Endpoint, Fonts URL, Image CDNs)    -->
+  <!-- ===================================================================== -->
+  <link rel="preconnect" href="https://bunbunserver.my.id" crossorigin="anonymous" />
+  <link rel="dns-prefetch" href="https://bunbunserver.my.id" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+  <link rel="dns-prefetch" href="https://blogger.googleusercontent.com" />
+  <link rel="dns-prefetch" href="https://lh3.googleusercontent.com" />
+  <link rel="dns-prefetch" href="https://i0.wp.com" />
+
+  <!-- ===================================================================== -->
+  <!-- 2. PUBSUBHUBBUB HUB & ATOM FEED LINKS                                 -->
+  <!-- ===================================================================== -->
+  <link rel="hub" href="https://pubsubhubbub.appspot.com" />
+  <link id="atom-feed-link" rel="alternate" type="application/atom+xml" title="Technical Knowledgebase - Atom" href="https://bunbunserver.my.id/atom.xml" />
+
+  <!-- ===================================================================== -->
+  <!-- 3. INITIAL TITLE, CANONICAL URL, CORE SEO & OPEN GRAPH META TAGS      -->
+  <!-- ===================================================================== -->
+  <title>Technical Knowledgebase</title>
+  <link id="canonical-url" rel="canonical" href="https://bunbunserver.my.id/" />
+  <meta id="meta-robots" name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+  <meta id="meta-seo" name="description" content="Verified technical guides, diagnostic procedures, and engineering diagrams." />
+  <meta id="og-type" property="og:type" content="website" />
+  <meta id="og-title" property="og:title" content="Technical Knowledgebase" />
+  <meta id="og-description" property="og:description" content="Verified technical guides, diagnostic procedures, and engineering diagrams." />
+  <meta id="og-url" property="og:url" content="https://bunbunserver.my.id/" />
+  <meta id="og-image" property="og:image" content="" />
+
+  <!-- ===================================================================== -->
+  <!-- 4. SYNCHRONOUS CANONICAL URL INIT + PRIORITY #1 API FETCH IN <HEAD>   -->
+  <!--    Ensures canonical URL is 100% accurate at millisecond 0 and starts -->
+  <!--    fetching Article Text & Images before CSS or <body> parses.        -->
+  <!-- ===================================================================== -->
+  <script>
+  (function() {
+    var API_ENDPOINT = 'https://bunbunserver.my.id';
+
+    var rawOrigin = (window.location && window.location.origin && window.location.origin !== 'null')
+      ? window.location.origin.replace(/\/+$/, '')
+      : API_ENDPOINT;
+
+    var siteTitle = (document.documentElement.getAttribute('data-site-title') || '').trim() ||
+      ((window.location && window.location.hostname && window.location.hostname !== 'localhost')
+        ? window.location.hostname
+        : 'Technical Knowledgebase');
+
+    function resolveRouteFromLocation() {
+      var params = new URLSearchParams(window.location.search || '');
+      var hashStr = (window.location.hash || '').replace(/^#\/?/, '');
+      if (hashStr.indexOf('?') !== -1) {
+        var hashParams = new URLSearchParams(hashStr.split('?')[1]);
+        hashParams.forEach(function(val, key) {
+          if (!params.get(key)) params.set(key, val);
+        });
+      }
+      var category = (params.get('category') || params.get('db') || '').trim();
+      var slug = (params.get('slug') || '').trim();
+      var page = (params.get('page') || params.get('view') || '').trim().toLowerCase();
+      var pathname = (window.location.pathname || '').toLowerCase();
+
+      if (page === 'sitemap' || hashStr === 'sitemap' || pathname.endsWith('/sitemap') || pathname.endsWith('/sitemap.html')) {
+        return { pageMode: 'sitemap', category: category, slug: '' };
+      }
+      if (category && slug) {
+        return { pageMode: 'article', category: category, slug: slug };
+      }
+      if (category) {
+        return { pageMode: 'category', category: category, slug: '' };
+      }
+      return { pageMode: 'home', category: '', slug: '' };
+    }
+
+    function buildCanonicalForRoute(route) {
+      if (route.pageMode === 'article') {
+        return rawOrigin + '/?category=' + encodeURIComponent(route.category) + '&slug=' + encodeURIComponent(route.slug);
+      }
+      if (route.pageMode === 'category') {
+        return rawOrigin + '/?category=' + encodeURIComponent(route.category);
+      }
+      if (route.pageMode === 'sitemap') {
+        return rawOrigin + '/?page=sitemap';
+      }
+      return rawOrigin + '/';
+    }
+
+    function buildPrimaryApiUrl(route) {
+      if (route.pageMode === 'article') {
+        return API_ENDPOINT + '/api/article?category=' + encodeURIComponent(route.category) + '&slug=' + encodeURIComponent(route.slug);
+      }
+      if (route.pageMode === 'category') {
+        return API_ENDPOINT + '/api/category/' + encodeURIComponent(route.category) + '?limit=24';
+      }
+      if (route.pageMode === 'sitemap') {
+        return API_ENDPOINT + '/api/articles/random?limit=60';
+      }
+      return API_ENDPOINT + '/api/articles/random?limit=24';
+    }
+
+    var initialRoute = resolveRouteFromLocation();
+    var initialCanonical = buildCanonicalForRoute(initialRoute);
+    var initialApiUrl = buildPrimaryApiUrl(initialRoute);
+
+    // 1. Set Canonical URL & Atom Feed URL immediately in the beginning (synchronous)
+    var canonicalEl = document.getElementById('canonical-url');
+    if (canonicalEl) {
+      canonicalEl.setAttribute('href', initialCanonical);
+    }
+    var ogUrlEl = document.getElementById('og-url');
+    if (ogUrlEl) {
+      ogUrlEl.setAttribute('content', initialCanonical);
+    }
+    var atomEl = document.getElementById('atom-feed-link');
+    if (atomEl) {
+      atomEl.setAttribute('href', rawOrigin + '/atom.xml');
+      atomEl.setAttribute('title', siteTitle + ' - Atom');
+    }
+
+    // 2. Set initial baseline <title>, #meta-seo, and Open Graph tags synchronously based on route
+    var metaSeoEl = document.getElementById('meta-seo');
+    var ogTitleEl = document.getElementById('og-title');
+    var ogDescEl = document.getElementById('og-description');
+    var ogTypeEl = document.getElementById('og-type');
+    var initialTitle = siteTitle;
+    var initialDesc = 'Explore technical guides and engineering diagrams from global databases on ' + siteTitle + '.';
+
+    if (initialRoute.pageMode === 'article') {
+      var readableSlug = initialRoute.slug.replace(/[-_]+/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+      initialTitle = readableSlug + ' - ' + siteTitle;
+      initialDesc = readableSlug + ' technical specification and reference diagrams on ' + siteTitle + '.';
+      if (ogTypeEl) ogTypeEl.setAttribute('content', 'article');
+    } else if (initialRoute.pageMode === 'category') {
+      var readableCat = initialRoute.category.replace(/[-_]+/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+      initialTitle = readableCat + ' - ' + siteTitle;
+      initialDesc = 'Browse random ' + readableCat + ' technical articles and diagrams on ' + siteTitle + '.';
+    } else if (initialRoute.pageMode === 'sitemap') {
+      initialTitle = 'HTML Sitemap & Directory - ' + siteTitle;
+      initialDesc = 'Complete HTML sitemap, category database index, and syndication feeds for ' + siteTitle + '.';
+    }
+
+    document.title = initialTitle;
+    if (metaSeoEl) metaSeoEl.setAttribute('content', initialDesc);
+    if (ogTitleEl) ogTitleEl.setAttribute('content', initialTitle);
+    if (ogDescEl) ogDescEl.setAttribute('content', initialDesc);
+
+    // 3. Fire Priority #1 API Data-Fetching Sequence (Article Text & Image First)
+    var initialAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var fetchOpts = {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      priority: 'high'
+    };
+    if (initialAbortController) {
+      fetchOpts.signal = initialAbortController.signal;
+    }
+
+    var dataPromise = fetch(initialApiUrl, fetchOpts).then(function(response) {
+      if (!response.ok) {
+        var error = new Error('HTTP ' + response.status);
+        error.status = response.status;
+        throw error;
+      }
+      return response.json();
+    });
+
+    window.__BUNBUN_CSR__ = {
+      templateName: 'BunBun Vanilla CSR',
+      templateVersion: '1.2.0',
+      apiEndpoint: API_ENDPOINT,
+      homepageUrl: rawOrigin,
+      blogTitle: siteTitle,
+      blogDescription: 'Explore technical guides, specifications, and reference diagrams across all categories on ' + siteTitle + '.',
+      pageMode: initialRoute.pageMode,
+      category: initialRoute.category,
+      slug: initialRoute.slug,
+      canonicalUrl: initialCanonical,
+      dataPromise: dataPromise,
+      initialAbortController: initialAbortController,
+      resolveRouteFromLocation: resolveRouteFromLocation,
+      buildCanonicalForRoute: buildCanonicalForRoute,
+      buildPrimaryApiUrl: buildPrimaryApiUrl
+    };
+  })();
+  </script>
+
+  <!-- Non-blocking Google Fonts (Async load with print media swap + noscript fallback) -->
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+  <noscript>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  </noscript>
+
+  <!-- ===================================================================== -->
+  <!-- ZERO-BLOCKING PRE-COMPILED TAILWIND UTILITY CSS (Replaces Play CDN)   -->
+  <!-- Eliminates ~100KB+ render-blocking JS and runtime DOM mutation scans  -->
+  <!-- ===================================================================== -->
+  <style>
+    *, ::before, ::after { box-sizing: border-box; border-width: 0; border-style: solid; border-color: #e2e8f0; }
+    html { line-height: 1.5; -webkit-text-size-adjust: 100%; font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    body { margin: 0; padding: 0; line-height: inherit; }
+    h1, h2, h3, p, figure, ul { margin: 0; padding: 0; }
+    ul { list-style: none; }
+    a { color: inherit; text-decoration: inherit; }
+    img { display: block; max-width: 100%; height: auto; }
+
+    /* Accessibility Skip Link */
+    .sr-skip-link { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border-width: 0; }
+    .sr-skip-link:focus { position: fixed; top: 0.75rem; left: 0.75rem; z-index: 50; width: auto; height: auto; padding: 0.5rem 1rem; margin: 0; overflow: visible; clip: auto; background-color: #2563eb; color: #ffffff; font-size: 0.875rem; font-weight: 600; border-radius: 0.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+
+    /* Crawl-Safe Broken Image Fallback Styles (Zero Network Request / Preserves img[src] in DOM) */
+    img.img-broken-crawl-safe {
+      width: 1px !important;
+      height: 1px !important;
+      min-height: 0 !important;
+      max-height: 1px !important;
+      opacity: 0 !important;
+      position: absolute !important;
+      pointer-events: none !important;
+      overflow: hidden !important;
+    }
+    .img-fallback-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 1.75rem 1.25rem;
+      background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+      color: #475569;
+      min-height: 180px;
+      width: 100%;
+    }
+    .img-fallback-thumb {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+      min-height: 64px;
+      background-color: #f1f5f9;
+      color: #64748b;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-align: center;
+      padding: 0.5rem;
+    }
+
+    /* Layout & Flexbox / Grid */
+    .min-h-screen { min-height: 100vh; }
+    .flex { display: flex; }
+    .inline-flex { display: inline-flex; }
+    .inline-block { display: inline-block; }
+    .block { display: block; }
+    .grid { display: grid; }
+    .flex-col { flex-direction: column; }
+    .flex-wrap { flex-wrap: wrap; }
+    .flex-1 { flex: 1 1 0%; }
+    .shrink-0 { flex-shrink: 0; }
+    .min-w-0 { min-width: 0px; }
+    .items-center { align-items: center; }
+    .items-start { align-items: flex-start; }
+    .justify-between { justify-content: space-between; }
+    .grid-cols-1 { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+    .relative { position: relative; }
+    .sticky { position: sticky; }
+    .top-0 { top: 0px; }
+    .z-20 { z-index: 20; }
+
+    /* Sizing & Spacing */
+    .w-full { width: 100%; }
+    .w-20 { width: 5rem; }
+    .h-16 { height: 4rem; }
+    .h-full { height: 100%; }
+    .max-w-xl { max-width: 36rem; }
+    .max-w-3xl { max-width: 48rem; }
+    .max-w-6xl { max-width: 72rem; }
+    .max-h-\[500px\] { max-height: 500px; }
+    .max-h-\[440px\] { max-height: 440px; }
+    .mx-auto { margin-left: auto; margin-right: auto; }
+    .my-6 { margin-top: 1.5rem; margin-bottom: 1.5rem; }
+    .mt-0\.5 { margin-top: 0.125rem; }
+    .mt-1 { margin-top: 0.25rem; }
+    .mt-1\.5 { margin-top: 0.375rem; }
+    .mt-2 { margin-top: 0.5rem; }
+    .mt-3 { margin-top: 0.75rem; }
+    .mt-4 { margin-top: 1rem; }
+    .mt-6 { margin-top: 1.5rem; }
+    .mt-8 { margin-top: 2rem; }
+    .mt-12 { margin-top: 3rem; }
+    .mb-2 { margin-bottom: 0.5rem; }
+    .mb-3 { margin-bottom: 0.75rem; }
+    .mb-4 { margin-bottom: 1rem; }
+    .mb-6 { margin-bottom: 1.5rem; }
+    .p-3 { padding: 0.75rem; }
+    .p-5 { padding: 1.25rem; }
+    .p-6 { padding: 1.5rem; }
+    .p-8 { padding: 2rem; }
+    .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+    .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+    .px-3\.5 { padding-left: 0.875rem; padding-right: 0.875rem; }
+    .px-4 { padding-left: 1rem; padding-right: 1rem; }
+    .py-0\.5 { padding-top: 0.125rem; padding-bottom: 0.125rem; }
+    .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+    .py-1\.5 { padding-top: 0.375rem; padding-bottom: 0.375rem; }
+    .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+    .py-2\.5 { padding-top: 0.625rem; padding-bottom: 0.625rem; }
+    .py-6 { padding-top: 1.5rem; padding-bottom: 1.5rem; }
+    .pt-3 { padding-top: 0.75rem; }
+    .pb-3 { padding-bottom: 0.75rem; }
+    .pb-4 { padding-bottom: 1rem; }
+    .pb-6 { padding-bottom: 1.5rem; }
+    .first\:pt-0:first-child { padding-top: 0px; }
+    .last\:pb-0:last-child { padding-bottom: 0px; }
+
+    /* Gaps & Space Between */
+    .gap-1 { gap: 0.25rem; }
+    .gap-1\.5 { gap: 0.375rem; }
+    .gap-2 { gap: 0.5rem; }
+    .gap-2\.5 { gap: 0.625rem; }
+    .gap-3 { gap: 0.75rem; }
+    .gap-3\.5 { gap: 0.875rem; }
+    .gap-4 { gap: 1rem; }
+    .gap-6 { gap: 1.5rem; }
+    .gap-x-6 { column-gap: 1.5rem; }
+    .gap-y-2\.5 { row-gap: 0.625rem; }
+    .space-y-4 > :not([hidden]) ~ :not([hidden]) { margin-top: 1rem; }
+    .space-y-8 > :not([hidden]) ~ :not([hidden]) { margin-top: 2rem; }
+    .divide-y > :not([hidden]) ~ :not([hidden]) { border-top-width: 1px; }
+    .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #f1f5f9; }
+
+    /* Borders & Radius */
+    .border { border-width: 1px; }
+    .border-t { border-top-width: 1px; }
+    .border-b { border-bottom-width: 1px; }
+    .border-slate-100 { border-color: #f1f5f9; }
+    .border-slate-200 { border-color: #e2e8f0; }
+    .border-blue-100 { border-color: #dbeafe; }
+    .rounded { border-radius: 0.25rem; }
+    .rounded-lg { border-radius: 0.5rem; }
+    .rounded-xl { border-radius: 0.75rem; }
+    .rounded-2xl { border-radius: 1rem; }
+    .rounded-full { border-radius: 9999px; }
+
+    /* Backgrounds & Shadows */
+    .bg-white { background-color: #ffffff; }
+    .bg-slate-50 { background-color: #f8fafc; }
+    .bg-slate-100 { background-color: #f1f5f9; }
+    .bg-slate-100\/80 { background-color: rgba(241, 245, 249, 0.8); }
+    .bg-blue-50 { background-color: #eff6ff; }
+    .bg-blue-600 { background-color: #2563eb; }
+    .shadow-sm { box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); }
+
+    /* Typography */
+    .font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .text-\[11px\] { font-size: 11px; line-height: 1.4; }
+    .text-xs { font-size: 0.75rem; line-height: 1rem; }
+    .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+    .text-base { font-size: 1rem; line-height: 1.5rem; }
+    .text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+    .text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+    .text-2xl { font-size: 1.5rem; line-height: 2rem; }
+    .font-medium { font-weight: 500; }
+    .font-semibold { font-weight: 600; }
+    .font-bold { font-weight: 700; }
+    .font-extrabold { font-weight: 800; }
+    .uppercase { text-transform: uppercase; }
+    .tracking-tight { letter-spacing: -0.025em; }
+    .tracking-wider { letter-spacing: 0.05em; }
+    .leading-tight { line-height: 1.25; }
+    .leading-snug { line-height: 1.375; }
+    .leading-relaxed { line-height: 1.625; }
+    .text-center { text-align: center; }
+    .underline-offset-2 { text-underline-offset: 2px; }
+    .antialiased { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+    .whitespace-nowrap { white-space: nowrap; }
+    .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .line-clamp-1 { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
+    .line-clamp-2 { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+    .line-clamp-3 { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+
+    /* Text Colors */
+    .text-white { color: #ffffff; }
+    .text-slate-400 { color: #94a3b8; }
+    .text-slate-500 { color: #64748b; }
+    .text-slate-600 { color: #475569; }
+    .text-slate-700 { color: #334155; }
+    .text-slate-800 { color: #1e293b; }
+    .text-slate-900 { color: #0f172a; }
+    .text-blue-600 { color: #2563eb; }
+    .text-blue-700 { color: #1d4ed8; }
+
+    /* Media, Overflow & Interaction */
+    .overflow-hidden { overflow: hidden; }
+    .overflow-x-auto { overflow-x: auto; }
+    .object-contain { object-fit: contain; }
+    .object-cover { object-fit: cover; }
+    .aspect-\[16\/10\] { aspect-ratio: 16 / 10; }
+    .cursor-pointer { cursor: pointer; }
+    .transition-colors { transition-property: color, background-color, border-color; transition-duration: 150ms; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
+    .transition-shadow { transition-property: box-shadow; transition-duration: 150ms; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
+
+    /* Hover & Group States */
+    .hover\:bg-blue-50:hover { background-color: #eff6ff; }
+    .hover\:bg-blue-50\/60:hover { background-color: rgba(239, 246, 255, 0.6); }
+    .hover\:bg-blue-100:hover { background-color: #dbeafe; }
+    .hover\:bg-slate-50\/70:hover { background-color: rgba(248, 250, 252, 0.7); }
+    .hover\:border-blue-300:hover { border-color: #93c5fd; }
+    .hover\:text-blue-600:hover { color: #2563eb; }
+    .hover\:text-blue-800:hover { color: #1e40af; }
+    .hover\:underline:hover { text-decoration: underline; }
+    .hover\:shadow-md:hover { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1); }
+    .group:hover .group-hover\:text-blue-600 { color: #2563eb; }
+
+    /* Responsive Breakpoints (sm: 640px, lg: 1024px) */
+    @media (min-width: 640px) {
+      .sm\:px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+      .sm\:py-10 { padding-top: 2.5rem; padding-bottom: 2.5rem; }
+      .sm\:p-8 { padding: 2rem; }
+      .sm\:p-10 { padding: 2.5rem; }
+      .sm\:text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+      .sm\:text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+      .sm\:text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+      .sm\:text-2xl { font-size: 1.5rem; line-height: 2rem; }
+      .sm\:text-3xl { font-size: 1.875rem; line-height: 2.25rem; }
+      .sm\:flex-row { flex-direction: row; }
+      .sm\:items-center { align-items: center; }
+      .sm\:items-end { align-items: flex-end; }
+      .sm\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (min-width: 1024px) {
+      .lg\:text-4xl { font-size: 2.25rem; line-height: 2.5rem; }
+      .lg\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+
+<body class="min-h-screen flex flex-col bg-slate-50 text-slate-900 antialiased">
+
+  <!-- Keyboard Accessibility Skip Link -->
+  <a href="#app-main" class="sr-skip-link">Skip to main content</a>
+
+  <!-- ===================================================================== -->
+  <!-- HEADER NAVIGATION (Natural DOM order for WCAG 2.4.3 Focus Order)      -->
+  <!-- ===================================================================== -->
+  <header id="app-header" class="bg-white border-b border-slate-200 sticky top-0 z-20">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+      <a id="brand-home-link" href="#home" data-route="home" class="text-lg sm:text-xl font-extrabold text-slate-900 hover:text-blue-600 transition-colors truncate">
+        Technical Knowledgebase
+      </a>
+      <nav id="app-category-nav" aria-label="Primary Navigation" class="flex items-center gap-2 overflow-x-auto text-xs sm:text-sm font-medium">
+        <a id="nav-home-link" href="#home" data-route="home" class="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-semibold whitespace-nowrap">Home</a>
+        <a id="nav-sitemap-link" href="#sitemap" data-route="sitemap" class="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-600 transition-colors whitespace-nowrap">Sitemap</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- ===================================================================== -->
+  <!-- MAIN ARTICLE TEXT & IMAGE / LISTING CONTAINER                         -->
+  <!-- ===================================================================== -->
+  <main id="app-main" role="main" tabindex="-1" class="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
+    <article id="app-priority-content" class="max-w-3xl mx-auto bg-white rounded-xl border border-slate-200 p-6 sm:p-8">
+      <h1 id="app-initial-heading" class="text-xl sm:text-2xl font-bold text-slate-900">Technical Knowledgebase</h1>
+      <p class="mt-2 text-sm text-slate-500">Loading technical article text and diagrams...</p>
+    </article>
+  </main>
+
+  <!-- ===================================================================== -->
+  <!-- FOOTER                                                                -->
+  <!-- ===================================================================== -->
+  <footer id="app-footer" class="bg-white border-t border-slate-200 mt-12">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+      <div class="flex flex-wrap items-center gap-2">
+        <a id="footer-home-link" href="#home" data-route="home" class="font-semibold text-slate-700 hover:text-blue-600">Technical Knowledgebase</a>
+        <span>&#8212; Powered by BunBun Vanilla CSR v1.2.0</span>
+      </div>
+      <div class="flex items-center gap-4">
+        <a id="footer-sitemap-link" href="#sitemap" data-route="sitemap" class="font-medium text-slate-600 hover:text-blue-600 transition-colors">Sitemap</a>
+        <span id="footer-origin-label" class="font-mono text-slate-400">https://bunbunserver.my.id</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ===================================================================== -->
+  <!-- 5. CLIENT-SIDE RENDERING ENGINE (ARTICLE TEXT & IMAGES FIRST)         -->
+  <!-- ===================================================================== -->
+  <script>
+  (function() {
+    'use strict';
+
+    /**
+     * =========================================================================
+     * CENTRALIZED TAILWIND CSS CLASS MAP (Easy to restyle/redesign in future)
+     * =========================================================================
+     */
+    var TW = {
+      // Single Article Page (Priority #1 Content)
+      articleContainer: 'max-w-3xl mx-auto bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-10',
+      breadcrumb: 'flex flex-wrap items-center gap-2 text-xs text-slate-500 mb-4',
+      breadcrumbLink: 'hover:text-blue-600 underline-offset-2 hover:underline cursor-pointer',
+      categoryBadge: 'inline-block px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider bg-blue-50 text-blue-700 mb-3 hover:bg-blue-100 transition-colors cursor-pointer',
+      articleTitle: 'text-2xl sm:text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight leading-tight',
+      articleMeta: 'mt-3 pb-6 border-b border-slate-200 text-xs sm:text-sm text-slate-500 flex flex-wrap items-center gap-3',
+      heroFigure: 'relative my-6 rounded-xl overflow-hidden border border-slate-200 bg-slate-50',
+      heroImg: 'w-full max-h-[500px] object-contain mx-auto block',
+      figureCaption: 'px-4 py-2.5 text-xs text-slate-600 bg-slate-100/80 border-t border-slate-200',
+      sentencesWrapper: 'mt-6 space-y-4 text-base sm:text-lg text-slate-800 leading-relaxed',
+      sentenceParagraph: 'text-slate-800 leading-relaxed',
+      inlineFigure: 'relative my-6 rounded-xl overflow-hidden border border-slate-200 bg-white',
+      inlineImg: 'w-full max-h-[440px] object-contain mx-auto block',
+
+      // Single Article Page — Related Posts Component (Non-Priority, Limit = 10)
+      relatedSection: 'max-w-3xl mx-auto mt-8 bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-8',
+      relatedHeader: 'text-lg sm:text-xl font-bold text-slate-900 pb-3 mb-4 border-b border-slate-200',
+      relatedList: 'grid grid-cols-1 sm:grid-cols-2 gap-4',
+      relatedCard: 'group flex items-start gap-3.5 p-3 rounded-xl border border-slate-200 hover:border-blue-300 hover:bg-slate-50/70 transition-colors cursor-pointer',
+      relatedThumbWrap: 'relative w-20 h-16 rounded-lg bg-slate-100 overflow-hidden shrink-0 border border-slate-200',
+      relatedThumb: 'w-full h-full object-cover',
+      relatedBody: 'min-w-0 flex-1',
+      relatedCat: 'block text-[11px] font-semibold uppercase tracking-wider text-blue-600',
+      relatedTitle: 'mt-0.5 text-sm font-bold text-slate-900 group-hover:text-blue-600 line-clamp-2 leading-snug',
+
+      // Single Article Page — Related Links Component (Non-Priority, All Categories & All Domains)
+      relatedLinksSection: 'max-w-3xl mx-auto mt-6 bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-8',
+      relatedLinksHeader: 'text-lg sm:text-xl font-bold text-slate-900 pb-3 mb-4 border-b border-slate-200',
+      relatedLinksList: 'divide-y divide-slate-100',
+      relatedLinksItem: 'py-2.5 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5',
+      relatedLinksAnchor: 'text-sm font-semibold text-slate-800 hover:text-blue-600 transition-colors line-clamp-1',
+      relatedLinksMetaWrap: 'flex items-center gap-2 shrink-0',
+      relatedLinksCatBadge: 'px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-600',
+      relatedLinksDomainBadge: 'px-2 py-0.5 rounded text-[11px] font-mono text-blue-700 bg-blue-50 border border-blue-100',
+
+      // Homepage & Category Listing Pages
+      sectionHeader: 'mb-6 pb-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-end justify-between gap-3',
+      sectionTitle: 'text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight',
+      sectionDesc: 'mt-1 text-sm text-slate-600',
+      postsGrid: 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6',
+      postCard: 'bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow overflow-hidden flex flex-col',
+      cardImgLink: 'relative block aspect-[16/10] bg-slate-100 overflow-hidden border-b border-slate-100 cursor-pointer',
+      cardImg: 'w-full h-full object-cover',
+      cardBody: 'p-5 flex-1 flex flex-col justify-between',
+      cardCatLink: 'text-xs font-semibold uppercase tracking-wider text-blue-600 hover:underline cursor-pointer',
+      cardTitle: 'mt-1.5 text-base sm:text-lg font-bold text-slate-900 hover:text-blue-600 line-clamp-2 cursor-pointer',
+      cardExcerpt: 'mt-2 text-xs sm:text-sm text-slate-600 line-clamp-3',
+      cardReadMore: 'mt-4 pt-3 border-t border-slate-100 text-xs font-semibold text-blue-600 hover:text-blue-800 inline-flex items-center gap-1 cursor-pointer',
+
+      // Sitemap Page
+      sitemapContainer: 'space-y-8',
+      sitemapCard: 'bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-8',
+      sitemapGroupTitle: 'text-base sm:text-lg font-bold text-slate-900 flex items-center justify-between pb-3 mb-4 border-b border-slate-200',
+      sitemapGrid: 'grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2.5',
+      sitemapItemLink: 'text-sm text-slate-700 hover:text-blue-600 hover:underline truncate block py-0.5 cursor-pointer',
+
+      // Header Category Navigation Links (Homepage, Category & Sitemap Pages)
+      navLink: 'px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-600 transition-colors whitespace-nowrap cursor-pointer',
+      navLinkActive: 'px-3 py-1.5 rounded-lg bg-blue-600 text-white font-semibold whitespace-nowrap cursor-pointer'
+    };
+
+    var csr = window.__BUNBUN_CSR__ || {};
+    var mainEl = document.getElementById('app-main');
+    var navEl = document.getElementById('app-category-nav');
+    var brandLinkEl = document.getElementById('brand-home-link');
+    var navHomeLinkEl = document.getElementById('nav-home-link');
+    var navSitemapLinkEl = document.getElementById('nav-sitemap-link');
+    var footerHomeEl = document.getElementById('footer-home-link');
+    var footerSitemapEl = document.getElementById('footer-sitemap-link');
+    var footerOriginEl = document.getElementById('footer-origin-label');
+    var cachedCategories = [];
+    var isFetchingCategories = false;
+    var activeNavigationId = 1;
+    var activeAbortController = csr.initialAbortController || null;
+
+    // Session-level cache of known broken image URLs to prevent repeat HTTP requests across SPA navigation
+    var failedImageUrlCache = {};
+
+    // Immediately initialize static navigation hrefs so middle-click / right-click work at ms 0
+    if (brandLinkEl) {
+      brandLinkEl.setAttribute('href', csr.homepageUrl + '/');
+      brandLinkEl.textContent = csr.blogTitle;
+    }
+    if (navHomeLinkEl) {
+      navHomeLinkEl.setAttribute('href', csr.homepageUrl + '/');
+    }
+    if (navSitemapLinkEl) {
+      navSitemapLinkEl.setAttribute('href', csr.homepageUrl + '/?page=sitemap');
+    }
+    if (footerHomeEl) {
+      footerHomeEl.setAttribute('href', csr.homepageUrl + '/');
+      footerHomeEl.textContent = csr.blogTitle;
+    }
+    if (footerSitemapEl) {
+      footerSitemapEl.setAttribute('href', csr.homepageUrl + '/?page=sitemap');
+    }
+    if (footerOriginEl) {
+      footerOriginEl.textContent = csr.homepageUrl;
+    }
+
+    function escapeHtml(str) {
+      return String(str == null ? '' : str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    /**
+     * Validates URLs before injecting into href/src attributes to block
+     * javascript:, data:, or vbscript: XSS payloads from external API data.
+     */
+    function sanitizeUrl(rawUrl) {
+      var trimmed = String(rawUrl == null ? '' : rawUrl).trim();
+      if (!trimmed) return '';
+      if (trimmed.charAt(0) === '/' && trimmed.charAt(1) !== '/') {
+        return trimmed;
+      }
+      try {
+        var parsed = new URL(trimmed, csr.homepageUrl);
+        if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+          return parsed.href;
+        }
+      } catch (e) {}
+      return '';
+    }
+
+    /**
+     * =========================================================================
+     * CRAWL-SAFE, ZERO-LOOP BROKEN IMAGE FALLBACK HANDLER
+     * =========================================================================
+     * Why this preserves SEO & prevents infinite HTTP loops:
+     * 1. Never reassigns `img.src` to another HTTP URL (which causes infinite
+     *    `onerror` loops if the fallback URL fails or triggers another request).
+     * 2. Preserves the original `src`, `alt`, and `itemprop="contentUrl"` on the
+     *    DOM `<img>` element (collapsed to 1x1px via `.img-broken-crawl-safe`)
+     *    so Googlebot-Image still discovers the original URL, `alt` text, and
+     *    Schema.org `ImageObject` microdata even if a transient CDN timeout occurs.
+     * 3. Guards with `data-fallback-applied="1"` and `img.onerror = null` so the
+     *    handler can execute at most once per element, and records the URL in
+     *    `failedImageUrlCache` for instant zero-network fallback on future renders.
+     */
+    function applyCrawlSafeImageFallback(imgEl) {
+      if (!imgEl || imgEl.getAttribute('data-fallback-applied') === '1') return;
+      imgEl.setAttribute('data-fallback-applied', '1');
+      imgEl.onerror = null;
+
+      var originalSrc = imgEl.getAttribute('data-canonical-src') || imgEl.getAttribute('src') || '';
+      if (originalSrc) {
+        failedImageUrlCache[originalSrc] = true;
+      }
+
+      // Collapse broken <img> visually without removing `src` or `alt` from DOM
+      imgEl.classList.add('img-broken-crawl-safe');
+
+      var parentEl = imgEl.parentNode;
+      if (!parentEl || parentEl.querySelector('[data-img-fallback-ui="1"]')) return;
+
+      var fallbackLabel = imgEl.getAttribute('alt') || 'Technical Diagram';
+      var isArticleFigure = parentEl.tagName === 'FIGURE';
+
+      var placeholder = document.createElement('div');
+      placeholder.setAttribute('data-img-fallback-ui', '1');
+      placeholder.setAttribute('role', 'img');
+      placeholder.setAttribute('aria-label', fallbackLabel);
+
+      if (isArticleFigure) {
+        placeholder.className = 'img-fallback-card';
+        placeholder.innerHTML =
+          '<svg aria-hidden="true" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="mb-2">' +
+            '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>' +
+            '<circle cx="8.5" cy="8.5" r="1.5"></circle>' +
+            '<polyline points="21 15 16 10 5 21"></polyline>' +
+          '</svg>' +
+          '<span class="text-xs sm:text-sm font-semibold text-slate-700">' + escapeHtml(fallbackLabel) + '</span>' +
+          '<span class="mt-1 text-[11px] font-mono text-slate-500">Technical diagram preview unavailable</span>';
+        parentEl.insertBefore(placeholder, imgEl.nextSibling);
+      } else {
+        placeholder.className = 'img-fallback-thumb';
+        placeholder.textContent = fallbackLabel;
+        parentEl.insertBefore(placeholder, imgEl.nextSibling);
+      }
+    }
+
+    // Capture-phase error listener catches all <img> load failures across the document
+    // without requiring inline `onerror="..."` attributes that can loop.
+    document.addEventListener('error', function(event) {
+      var target = event.target;
+      if (target && target.tagName === 'IMG') {
+        applyCrawlSafeImageFallback(target);
+      }
+    }, true);
+
+    function toIsoDate(ts) {
+      var n = Number(ts);
+      if (!Number.isFinite(n) || n <= 0) return new Date().toISOString();
+      var ms = n < 1e11 ? n * 1000 : n;
+      var d = new Date(ms);
+      return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+    }
+
+    function buildArticleHref(category, slug) {
+      return csr.homepageUrl + '/?category=' + encodeURIComponent(category) + '&slug=' + encodeURIComponent(slug);
+    }
+
+    function buildCategoryHref(category) {
+      return csr.homepageUrl + '/?category=' + encodeURIComponent(category);
+    }
+
+    function buildSitemapHref() {
+      return csr.homepageUrl + '/?page=sitemap';
+    }
+
+    function setHeadMeta(id, content) {
+      var el = document.getElementById(id);
+      if (el) el.setAttribute('content', String(content || ''));
+    }
+
+    function updateSeoAndOpenGraph(opts) {
+      var title = opts.title || csr.blogTitle;
+      var desc = opts.description || csr.blogDescription;
+      var url = opts.url || (csr.homepageUrl + '/');
+      var type = opts.type || 'website';
+      var image = sanitizeUrl(opts.image || '');
+      var robots = opts.robots || 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1';
+
+      document.title = title;
+      setCanonicalUrl(url);
+      setHeadMeta('meta-robots', robots);
+      setHeadMeta('meta-seo', desc);
+      setHeadMeta('og-type', type);
+      setHeadMeta('og-title', title);
+      setHeadMeta('og-description', desc);
+      setHeadMeta('og-url', url);
+      setHeadMeta('og-image', image);
+    }
+
+    function setCanonicalUrl(url) {
+      var el = document.getElementById('canonical-url');
+      if (el) el.setAttribute('href', String(url || csr.homepageUrl + '/'));
+    }
+
+    function removeHeadElement(id) {
+      var el = document.getElementById(id);
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+    }
+
+    /**
+     * Dynamically injects `<link id="preload-lcp-image" rel="preload" as="image">`
+     * for the primary Single Article hero diagram so Googlebot and browsers
+     * prioritize discovering and fetching the primary visual asset.
+     */
+    function setHeroImagePreload(heroUrl) {
+      removeHeadElement('preload-lcp-image');
+      var validUrl = sanitizeUrl(heroUrl);
+      if (!validUrl || failedImageUrlCache[validUrl]) return;
+      var link = document.createElement('link');
+      link.id = 'preload-lcp-image';
+      link.rel = 'preload';
+      link.as = 'image';
+      link.href = validUrl;
+      link.setAttribute('fetchpriority', 'high');
+      document.head.appendChild(link);
+    }
+
+    /**
+     * Escapes `<` as `\u003c` inside JSON-LD blocks to prevent premature
+     * closing script tag termination if API strings contain raw HTML tags.
+     */
+    function setJsonLd(id, dataObj) {
+      removeHeadElement(id);
+      if (!dataObj) return;
+      var s = document.createElement('script');
+      s.type = 'application/ld+json';
+      s.id = id;
+      s.textContent = JSON.stringify(dataObj).replace(/</g, '\\u003c');
+      document.head.appendChild(s);
+    }
+
+    function parseJsonArrayField(primaryArr, rawJsonField) {
+      if (Array.isArray(primaryArr)) return primaryArr;
+      if (Array.isArray(rawJsonField)) return rawJsonField;
+      if (typeof rawJsonField === 'string' && rawJsonField.trim()) {
+        try {
+          var parsed = JSON.parse(rawJsonField);
+          if (Array.isArray(parsed)) return parsed;
+        } catch (e) {}
+      }
+      return [];
+    }
+
+    function normalizeAllowedFrontendDomains(rawDomains) {
+      if (!Array.isArray(rawDomains)) return [csr.homepageUrl];
+      var apiHost = '';
+      try {
+        apiHost = new URL(csr.apiEndpoint).hostname.toLowerCase();
+      } catch (e) {}
+
+      var seen = {};
+      var validOrigins = [];
+
+      for (var i = 0; i < rawDomains.length; i++) {
+        var raw = String(rawDomains[i] || '').trim().replace(/\/+$/, '');
+        if (!raw || raw.indexOf('*') !== -1) continue;
+
+        var candidate = raw;
+        if (candidate.indexOf('http://') !== 0 && candidate.indexOf('https://') !== 0) {
+          candidate = 'https://' + candidate;
+        }
+
+        try {
+          var parsed = new URL(candidate);
+          if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') continue;
+          var host = parsed.hostname.toLowerCase();
+          if (host === 'localhost' || host === '127.0.0.1' || host === apiHost) {
+            continue;
+          }
+          var origin = parsed.protocol + '//' + host;
+          if (!seen[origin]) {
+            seen[origin] = true;
+            validOrigins.push(origin);
+          }
+        } catch (e) {}
+      }
+
+      if (validOrigins.length === 0) {
+        return [csr.homepageUrl];
+      }
+
+      for (var j = validOrigins.length - 1; j > 0; j--) {
+        var k = Math.floor(Math.random() * (j + 1));
+        var temp = validOrigins[j];
+        validOrigins[j] = validOrigins[k];
+        validOrigins[k] = temp;
+      }
+
+      return validOrigins;
+    }
+
+    /**
+     * =========================================================================
+     * NON-PRIORITY COMPONENT #1 (SINGLE ARTICLE PAGE ONLY): RELATED POSTS
+     * Uses `GET /api/articles/random?limit=10` with `priority: 'low'`.
+     * =========================================================================
+     */
+    function fetchAndRenderRelatedPostsDeferred(currentSlug, navId) {
+      var mountEl = document.getElementById('article-related-posts-mount');
+      if (!mountEl) return;
+
+      fetch(csr.apiEndpoint + '/api/articles/random?limit=10', {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        priority: 'low'
+      })
+        .then(function(res) {
+          return res.ok ? res.json() : null;
+        })
+        .then(function(data) {
+          if (!data || navId !== activeNavigationId || csr.pageMode !== 'article') return;
+          var currentMountEl = document.getElementById('article-related-posts-mount');
+          if (!currentMountEl) return;
+
+          var list = Array.isArray(data.articles) ? data.articles : [];
+          var filtered = list.filter(function(item) {
+            return item && item.slug && item.slug !== currentSlug;
+          }).slice(0, 10);
+
+          if (filtered.length === 0 && list.length > 0) {
+            filtered = list.slice(0, 10);
+          }
+          if (filtered.length === 0) return;
+
+          var itemsHtml = filtered.map(function(item) {
+            var url = sanitizeUrl(buildArticleHref(item.category, item.slug));
+            var thumb = sanitizeUrl(item.thumbnail || item.image || '');
+            var thumbHtml = thumb
+              ? '<div class="' + TW.relatedThumbWrap + '">' +
+                  '<img alt="' + escapeHtml(item.imageAlt || item.title) + '" class="' + TW.relatedThumb + '" data-canonical-src="' + escapeHtml(thumb) + '" decoding="async" height="64" loading="lazy" referrerpolicy="no-referrer" src="' + escapeHtml(thumb) + '" width="80"/>' +
+                '</div>'
+              : '';
+
+            return (
+              '<a class="' + TW.relatedCard + '" data-route="article" data-category="' + escapeHtml(item.category) + '" data-slug="' + escapeHtml(item.slug) + '" href="' + escapeHtml(url) + '">' +
+                thumbHtml +
+                '<div class="' + TW.relatedBody + '">' +
+                  '<span class="' + TW.relatedCat + '">' + escapeHtml(item.categoryLabel || item.category) + '</span>' +
+                  '<h3 class="' + TW.relatedTitle + '">' + escapeHtml(item.title) + '</h3>' +
+                '</div>' +
+              '</a>'
+            );
+          }).join('');
+
+          currentMountEl.innerHTML =
+            '<aside aria-label="Related Posts" class="' + TW.relatedSection + '" data-component="related-posts">' +
+              '<h2 class="' + TW.relatedHeader + '">Related Posts</h2>' +
+              '<div class="' + TW.relatedList + '">' +
+                itemsHtml +
+              '</div>' +
+            '</aside>';
+        })
+        .catch(function() {});
+    }
+
+    /**
+     * =========================================================================
+     * NON-PRIORITY COMPONENT #2 (SINGLE ARTICLE PAGE ONLY): RELATED LINKS
+     * Displays random posts from ALL categories and ALL allowed domains by
+     * pairing `GET /api/articles/random?limit=5` with `GET /api/domains/status`
+     * on the frontend (`priority: 'low'`).
+     * =========================================================================
+     */
+    function fetchAndRenderRelatedLinksDeferred(currentSlug, navId) {
+      var mountEl = document.getElementById('article-related-links-mount');
+      if (!mountEl) return;
+
+      var lowPriorityOpts = {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        priority: 'low'
+      };
+
+      Promise.all([
+        fetch(csr.apiEndpoint + '/api/articles/random?limit=5', lowPriorityOpts).then(function(r) { return r.ok ? r.json() : null; }),
+        fetch(csr.apiEndpoint + '/api/domains/status', lowPriorityOpts).then(function(r) { return r.ok ? r.json() : null; })
+      ])
+        .then(function(results) {
+          if (navId !== activeNavigationId || csr.pageMode !== 'article') return;
+          var currentMountEl = document.getElementById('article-related-links-mount');
+          if (!currentMountEl) return;
+
+          var articlesData = results[0];
+          var domainsData = results[1];
+          if (!articlesData || !Array.isArray(articlesData.articles)) return;
+
+          var rawDomains = (domainsData && Array.isArray(domainsData.activeHttp200Domains))
+            ? domainsData.activeHttp200Domains
+            : [];
+          var domainPool = normalizeAllowedFrontendDomains(rawDomains);
+
+          var list = articlesData.articles.filter(function(item) {
+            return item && item.slug && item.slug !== currentSlug;
+          }).slice(0, 5);
+
+          if (list.length === 0 && articlesData.articles.length > 0) {
+            list = articlesData.articles.slice(0, 5);
+          }
+          if (list.length === 0) return;
+
+          var linksHtml = list.map(function(item, idx) {
+            var targetOrigin = domainPool[idx % domainPool.length] || csr.homepageUrl;
+            var crossDomainHref = sanitizeUrl(targetOrigin + '/?category=' + encodeURIComponent(item.category) + '&slug=' + encodeURIComponent(item.slug));
+            var hostLabel = targetOrigin.replace(/^https?:\/\//, '');
+
+            return (
+              '<li class="' + TW.relatedLinksItem + '">' +
+                '<a class="' + TW.relatedLinksAnchor + '" href="' + escapeHtml(crossDomainHref) + '" target="_blank" rel="noopener">' +
+                  escapeHtml(item.title) +
+                '</a>' +
+                '<div class="' + TW.relatedLinksMetaWrap + '">' +
+                  '<span class="' + TW.relatedLinksCatBadge + '">' + escapeHtml(item.categoryLabel || item.category) + '</span>' +
+                  '<span class="' + TW.relatedLinksDomainBadge + '">' + escapeHtml(hostLabel) + '</span>' +
+                '</div>' +
+              '</li>'
+            );
+          }).join('');
+
+          currentMountEl.innerHTML =
+            '<aside aria-label="Related Links Across All Categories and Domains" class="' + TW.relatedLinksSection + '" data-component="related-links">' +
+              '<h2 class="' + TW.relatedLinksHeader + '">Related Links</h2>' +
+              '<ul class="' + TW.relatedLinksList + '">' +
+                linksHtml +
+              '</ul>' +
+            '</aside>';
+        })
+        .catch(function() {});
+    }
+
+    /**
+     * =========================================================================
+     * CRAWL-OPTIMIZED SINGLE ARTICLE FIGURE BUILDER
+     * =========================================================================
+     * Enhances Google Images & Googlebot indexing via:
+     * 1. Schema.org `ImageObject` microdata (`itemscope`, `itemtype`,
+     *    `itemprop="contentUrl"`, `itemprop="name"`, `itemprop="caption"`,
+     *    explicit `<meta itemprop="width">` & `<meta itemprop="height">`).
+     * 2. Descriptive, non-empty `alt` text and numbered figure captions when
+     *    distinct metadata is available.
+     * 3. Eager loading for the Hero image (`fetchpriority="high"`) and the first
+     *    inline diagram (`index <= 1`) so crawlers with shallow viewport
+     *    rendering still trigger immediate image discovery, with native
+     *    `loading="lazy"` for deeper images.
+     * 4. `referrerpolicy="no-referrer"` to prevent hotlink-protection 403 blocks
+     *    on external image CDNs (Blogger, Googleusercontent, WordPress JetPack).
+     * 5. Zero-network-request fallback if the image URL is already known to be
+     *    broken in `failedImageUrlCache`, while keeping the `<img>` tag in the
+     *    DOM for crawler inspection.
+     */
+    function buildFigureHtml(imgObj, fallbackTitle, imageIndex, catLabel) {
+      if (!imgObj) return '';
+      var validSrc = sanitizeUrl(imgObj.url);
+      if (!validSrc) return '';
+
+      var isHero = imageIndex === 0;
+      var rawAlt = String(imgObj.alt || '').trim();
+      var rawTitle = String(imgObj.title || '').trim();
+      var baseArticleTitle = String(fallbackTitle || 'Technical Diagram').trim();
+      var figureNum = imageIndex + 1;
+
+      var altText = rawAlt || rawTitle || (baseArticleTitle + (catLabel ? ' - ' + catLabel : '') + ' Diagram ' + figureNum);
+      var captionText = rawTitle || rawAlt || (baseArticleTitle + ' (Figure ' + figureNum + ')');
+
+      var figClass = isHero ? TW.heroFigure : TW.inlineFigure;
+      var imgClass = isHero ? TW.heroImg : TW.inlineImg;
+      var widthVal = Number(imgObj.width) || (isHero ? 800 : 700);
+      var heightVal = Number(imgObj.height) || (isHero ? 500 : 440);
+
+      // Eager-load hero + first inline diagram for immediate crawler discovery
+      var loadingAttr = imageIndex <= 1 ? 'eager' : 'lazy';
+      var priorityAttr = isHero ? ' fetchpriority="high"' : '';
+      var isKnownBroken = Boolean(failedImageUrlCache[validSrc]);
+
+      var brokenClassAttr = isKnownBroken ? ' img-broken-crawl-safe' : '';
+      var brokenDataAttr = isKnownBroken ? ' data-fallback-applied="1"' : '';
+      var fallbackUiHtml = isKnownBroken
+        ? '<div data-img-fallback-ui="1" role="img" aria-label="' + escapeHtml(altText) + '" class="img-fallback-card">' +
+            '<svg aria-hidden="true" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="mb-2">' +
+              '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>' +
+              '<circle cx="8.5" cy="8.5" r="1.5"></circle>' +
+              '<polyline points="21 15 16 10 5 21"></polyline>' +
+            '</svg>' +
+            '<span class="text-xs sm:text-sm font-semibold text-slate-700">' + escapeHtml(altText) + '</span>' +
+            '<span class="mt-1 text-[11px] font-mono text-slate-500">Technical diagram preview unavailable</span>' +
+          '</div>'
+        : '';
+
+      return (
+        '<figure class="' + figClass + '" itemprop="image" itemscope itemtype="https://schema.org/ImageObject" data-figure-index="' + figureNum + '">' +
+          '<img alt="' + escapeHtml(altText) + '" class="' + imgClass + brokenClassAttr + '"' + brokenDataAttr + ' data-canonical-src="' + escapeHtml(validSrc) + '" decoding="async"' + priorityAttr + ' height="' + heightVal + '" itemprop="contentUrl" loading="' + loadingAttr + '" referrerpolicy="no-referrer" src="' + escapeHtml(validSrc) + '" width="' + widthVal + '"/>' +
+          fallbackUiHtml +
+          '<meta itemprop="url" content="' + escapeHtml(validSrc) + '"/>' +
+          '<meta itemprop="name" content="' + escapeHtml(altText) + '"/>' +
+          '<meta itemprop="width" content="' + widthVal + '"/>' +
+          '<meta itemprop="height" content="' + heightVal + '"/>' +
+          '<figcaption class="' + TW.figureCaption + '" itemprop="caption">' + escapeHtml(captionText) + '</figcaption>' +
+        '</figure>'
+      );
+    }
+
+    /**
+     * Sweep newly mounted `<img>` tags in `mainEl` so any image that already
+     * failed before the event listener or has a cached failure gets its
+     * zero-network fallback immediately without firing another HTTP request.
+     */
+    function verifyMountedImages(containerEl) {
+      if (!containerEl) return;
+      var imgs = containerEl.querySelectorAll('img');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        var src = img.getAttribute('data-canonical-src') || img.getAttribute('src') || '';
+        if (src && failedImageUrlCache[src]) {
+          applyCrawlSafeImageFallback(img);
+        } else if (img.complete && img.naturalWidth === 0 && src) {
+          applyCrawlSafeImageFallback(img);
+        }
+      }
+    }
+
+    /**
+     * =========================================================================
+     * PAGE 1: SINGLE ARTICLE PAGE
+     * =========================================================================
+     */
+    function renderSingleArticle(article, navId) {
+      renderCategoryNavPills(cachedCategories);
+
+      var sentences = parseJsonArrayField(article.sentences, article.json_sentences);
+      var images = parseJsonArrayField(article.images, article.json_images);
+      var catSlug = article.category || csr.category;
+      var catLabel = article.categoryLabel || catSlug;
+      var articleSlug = article.slug || csr.slug;
+      var articleUrl = buildArticleHref(catSlug, articleSlug);
+      var categoryUrl = buildCategoryHref(catSlug);
+
+      // --- STEP 1: RENDER ARTICLE TEXT (json_sentences) & IMAGES (json_images) FIRST ---
+      var heroHtml = images.length > 0 ? buildFigureHtml(images[0], article.title, 0, catLabel) : '';
+
+      var paragraphs = [];
+      for (var i = 0; i < sentences.length; i += 3) {
+        paragraphs.push(sentences.slice(i, i + 3).join(' '));
+      }
+
+      var extraImages = images.slice(1);
+      var imgIndex = 0;
+      var imgStride = extraImages.length > 0
+        ? Math.max(2, Math.floor(paragraphs.length / (extraImages.length + 1)))
+        : 999999;
+
+      var contentBlocks = [];
+      for (var p = 0; p < paragraphs.length; p++) {
+        contentBlocks.push('<p class="' + TW.sentenceParagraph + '">' + escapeHtml(paragraphs[p]) + '</p>');
+
+        if (imgIndex < extraImages.length && ((p + 1) % imgStride === 0)) {
+          var currentExtraIdx = imgIndex + 1;
+          var diagHtml = buildFigureHtml(extraImages[imgIndex++], article.title, currentExtraIdx, catLabel);
+          if (diagHtml) contentBlocks.push(diagHtml);
+        }
+      }
+
+      while (imgIndex < extraImages.length) {
+        var remExtraIdx = imgIndex + 1;
+        var remHtml = buildFigureHtml(extraImages[imgIndex++], article.title, remExtraIdx, catLabel);
+        if (remHtml) contentBlocks.push(remHtml);
+      }
+
+      mainEl.innerHTML =
+        '<article class="' + TW.articleContainer + '" itemscope itemtype="https://schema.org/TechArticle">' +
+          '<nav aria-label="Breadcrumb" class="' + TW.breadcrumb + '">' +
+            '<a class="' + TW.breadcrumbLink + '" data-route="home" href="' + escapeHtml(csr.homepageUrl + '/') + '">Home</a>' +
+            '<span aria-hidden="true">/</span>' +
+            '<a class="' + TW.breadcrumbLink + '" data-route="category" data-category="' + escapeHtml(catSlug) + '" href="' + escapeHtml(categoryUrl) + '">' + escapeHtml(catLabel) + '</a>' +
+            '<span aria-hidden="true">/</span>' +
+            '<span aria-current="page" class="text-slate-800 font-semibold">' + escapeHtml(article.title) + '</span>' +
+          '</nav>' +
+          '<header>' +
+            '<a class="' + TW.categoryBadge + '" data-route="category" data-category="' + escapeHtml(catSlug) + '" href="' + escapeHtml(categoryUrl) + '" itemprop="articleSection">' + escapeHtml(catLabel) + '</a>' +
+            '<h1 class="' + TW.articleTitle + '" itemprop="headline">' + escapeHtml(article.title) + '</h1>' +
+          '</header>' +
+          heroHtml +
+          '<div class="' + TW.sentencesWrapper + '" id="article-json-sentences" itemprop="articleBody">' +
+            contentBlocks.join('') +
+          '</div>' +
+        '</article>' +
+        '<div id="article-related-posts-mount"></div>' +
+        '<div id="article-related-links-mount"></div>';
+
+      verifyMountedImages(mainEl);
+
+      // --- STEP 2: UPDATE <HEAD> (Title, Canonical, Preload Hero Image, Meta SEO, Open Graph, Rich ImageObject JSON-LD) ---
+      var metaDesc = article.metaDesc || article.meta_desc || (sentences.slice(0, 2).join(' ').slice(0, 157));
+
+      var structuredImageObjects = [];
+      for (var m = 0; m < images.length; m++) {
+        var rawImg = images[m];
+        var cleanImgUrl = rawImg && sanitizeUrl(rawImg.url);
+        if (!cleanImgUrl) continue;
+        var imgAlt = String(rawImg.alt || rawImg.title || (article.title + ' Diagram ' + (m + 1))).trim();
+        var imgCap = String(rawImg.title || rawImg.alt || imgAlt).trim();
+        structuredImageObjects.push({
+          '@type': 'ImageObject',
+          'url': cleanImgUrl,
+          'contentUrl': cleanImgUrl,
+          'name': imgAlt,
+          'caption': imgCap,
+          'description': imgAlt,
+          'width': Number(rawImg.width) || (m === 0 ? 800 : 700),
+          'height': Number(rawImg.height) || (m === 0 ? 500 : 440),
+          'representativeOfPage': m === 0
+        });
+      }
+
+      var primaryHeroUrl = structuredImageObjects.length > 0 ? structuredImageObjects[0].url : '';
+      setHeroImagePreload(primaryHeroUrl);
+
+      updateSeoAndOpenGraph({
+        title: article.title + ' - ' + csr.blogTitle,
+        description: metaDesc,
+        url: articleUrl,
+        type: 'article',
+        image: primaryHeroUrl
+      });
+
+      setJsonLd('json-ld-schema', {
+        '@context': 'https://schema.org',
+        '@type': 'TechArticle',
+        'mainEntityOfPage': {
+          '@type': 'WebPage',
+          '@id': articleUrl
+        },
+        'headline': article.title,
+        'description': metaDesc,
+        'image': structuredImageObjects.length > 0 ? structuredImageObjects : undefined,
+        'thumbnailUrl': primaryHeroUrl || undefined,
+        'articleSection': catLabel,
+        'datePublished': toIsoDate(article.createdAt || article.created_at),
+        'dateModified': toIsoDate(article.updatedAt || article.updated_at || article.createdAt || article.created_at),
+        'author': {
+          '@type': 'Organization',
+          'name': csr.blogTitle,
+          'url': csr.homepageUrl + '/'
+        },
+        'publisher': {
+          '@type': 'Organization',
+          'name': csr.blogTitle,
+          'url': csr.homepageUrl + '/'
+        }
+      });
+
+      setJsonLd('json-ld-breadcrumb', {
+        '@context': 'https://schema.org',
+        '@type': 'BreadcrumbList',
+        'itemListElement': [
+          {
+            '@type': 'ListItem',
+            'position': 1,
+            'name': 'Home',
+            'item': csr.homepageUrl + '/'
+          },
+          {
+            '@type': 'ListItem',
+            'position': 2,
+            'name': catLabel,
+            'item': categoryUrl
+          },
+          {
+            '@type': 'ListItem',
+            'position': 3,
+            'name': article.title,
+            'item': articleUrl
+          }
+        ]
+      });
+
+      // --- STEP 3: DEFERRED / NON-PRIORITY SECONDARY COMPONENTS ---
+      fetchAndRenderRelatedPostsDeferred(articleSlug, navId);
+      fetchAndRenderRelatedLinksDeferred(articleSlug, navId);
+    }
+
+    /**
+     * =========================================================================
+     * SHARED POST CARD BUILDER FOR HOMEPAGE & CATEGORY PAGE
+     * =========================================================================
+     */
+    function buildPostCardHtml(post, idx) {
+      var postUrl = sanitizeUrl(buildArticleHref(post.category, post.slug));
+      var catUrl = sanitizeUrl(buildCategoryHref(post.category));
+      var imgUrl = sanitizeUrl(post.thumbnail || post.image || '');
+      var isPriorityImg = idx < 3;
+
+      var imageBlock = imgUrl
+        ? '<a class="' + TW.cardImgLink + '" data-route="article" data-category="' + escapeHtml(post.category) + '" data-slug="' + escapeHtml(post.slug) + '" href="' + escapeHtml(postUrl) + '">' +
+            '<img alt="' + escapeHtml(post.imageAlt || post.title) + '" class="' + TW.cardImg + '" data-canonical-src="' + escapeHtml(imgUrl) + '" decoding="async" fetchpriority="' + (isPriorityImg ? 'high' : 'auto') + '" height="400" loading="' + (isPriorityImg ? 'eager' : 'lazy') + '" referrerpolicy="no-referrer" src="' + escapeHtml(imgUrl) + '" width="640"/>' +
+          '</a>'
+        : '';
+
+      return (
+        '<article class="' + TW.postCard + '">' +
+          imageBlock +
+          '<div class="' + TW.cardBody + '">' +
+            '<div>' +
+              '<a class="' + TW.cardCatLink + '" data-route="category" data-category="' + escapeHtml(post.category) + '" href="' + escapeHtml(catUrl) + '">' + escapeHtml(post.categoryLabel || post.category) + '</a>' +
+              '<h2 class="' + TW.cardTitle + '">' +
+                '<a data-route="article" data-category="' + escapeHtml(post.category) + '" data-slug="' + escapeHtml(post.slug) + '" href="' + escapeHtml(postUrl) + '">' + escapeHtml(post.title) + '</a>' +
+              '</h2>' +
+              '<p class="' + TW.cardExcerpt + '">' + escapeHtml(post.excerpt || '') + '</p>' +
+            '</div>' +
+            '<a class="' + TW.cardReadMore + '" data-route="article" data-category="' + escapeHtml(post.category) + '" data-slug="' + escapeHtml(post.slug) + '" href="' + escapeHtml(postUrl) + '">Read article &#8594;</a>' +
+          '</div>' +
+        '</article>'
+      );
+    }
+
+    /**
+     * =========================================================================
+     * PAGE 2: HOMEPAGE
+     * =========================================================================
+     */
+    function renderHomepage(data) {
+      removeHeadElement('preload-lcp-image');
+      var articles = (data && Array.isArray(data.articles)) ? data.articles : [];
+
+      var cardsHtml = articles.map(function(post, idx) {
+        return buildPostCardHtml(post, idx);
+      }).join('');
+
+      mainEl.innerHTML =
+        '<section>' +
+          '<header class="' + TW.sectionHeader + '">' +
+            '<div>' +
+              '<h1 class="' + TW.sectionTitle + '">' + escapeHtml(csr.blogTitle) + '</h1>' +
+              '<p class="' + TW.sectionDesc + '">Random technical guides and reference diagrams from global databases.</p>' +
+            '</div>' +
+          '</header>' +
+          '<div class="' + TW.postsGrid + '">' + cardsHtml + '</div>' +
+        '</section>';
+
+      verifyMountedImages(mainEl);
+
+      var homeUrl = csr.homepageUrl + '/';
+      var homeDesc = csr.blogDescription;
+      var firstThumb = articles[0] ? (articles[0].thumbnail || articles[0].image || '') : '';
+
+      updateSeoAndOpenGraph({
+        title: csr.blogTitle,
+        description: homeDesc,
+        url: homeUrl,
+        type: 'website',
+        image: firstThumb
+      });
+      removeHeadElement('json-ld-breadcrumb');
+
+      setJsonLd('json-ld-schema', {
+        '@context': 'https://schema.org',
+        '@type': 'WebSite',
+        'name': csr.blogTitle,
+        'url': homeUrl,
+        'description': homeDesc,
+        'mainEntity': {
+          '@type': 'ItemList',
+          'itemListElement': articles.slice(0, 10).map(function(item, index) {
+            return {
+              '@type': 'ListItem',
+              'position': index + 1,
+              'name': item.title,
+              'url': buildArticleHref(item.category, item.slug)
+            };
+          })
+        }
+      });
+    }
+
+    /**
+     * =========================================================================
+     * PAGE 3: CATEGORY PAGE
+     * =========================================================================
+     */
+    function renderCategoryPage(data) {
+      removeHeadElement('preload-lcp-image');
+      var articles = (data && Array.isArray(data.articles)) ? data.articles : [];
+      var catSlug = (data && data.category) || csr.category;
+      var catLabel = (data && data.categoryLabel) || catSlug;
+      var catUrl = buildCategoryHref(catSlug);
+      var catDesc = 'Explore random ' + catLabel + ' technical guides and diagrams on ' + csr.blogTitle + '.';
+      var firstThumb = articles[0] ? (articles[0].thumbnail || articles[0].image || '') : '';
+
+      var cardsHtml = articles.map(function(post, idx) {
+        return buildPostCardHtml(post, idx);
+      }).join('');
+
+      mainEl.innerHTML =
+        '<section>' +
+          '<header class="' + TW.sectionHeader + '">' +
+            '<div>' +
+              '<h1 class="' + TW.sectionTitle + '">' + escapeHtml(catLabel) + '</h1>' +
+              '<p class="' + TW.sectionDesc + '">' + escapeHtml(catDesc) + '</p>' +
+            '</div>' +
+          '</header>' +
+          '<div class="' + TW.postsGrid + '">' + cardsHtml + '</div>' +
+        '</section>';
+
+      verifyMountedImages(mainEl);
+
+      updateSeoAndOpenGraph({
+        title: catLabel + ' - ' + csr.blogTitle,
+        description: catDesc,
+        url: catUrl,
+        type: 'website',
+        image: firstThumb
+      });
+
+      removeHeadElement('json-ld-schema');
+      removeHeadElement('json-ld-breadcrumb');
+    }
+
+    /**
+     * =========================================================================
+     * PAGE 4: SITEMAP PAGE (`/?page=sitemap`)
+     * =========================================================================
+     */
+    function renderSitemapPage(data) {
+      removeHeadElement('preload-lcp-image');
+      var articles = (data && Array.isArray(data.articles)) ? data.articles : [];
+      var categories = (data && Array.isArray(data.categories) && data.categories.length > 0)
+        ? data.categories
+        : cachedCategories;
+
+      var sitemapUrl = buildSitemapHref();
+      var sitemapDesc = 'Complete HTML Sitemap, category database directory, and XML syndication links for ' + csr.blogTitle + '.';
+
+      updateSeoAndOpenGraph({
+        title: 'HTML Sitemap & Directory - ' + csr.blogTitle,
+        description: sitemapDesc,
+        url: sitemapUrl,
+        type: 'website',
+        image: ''
+      });
+      removeHeadElement('json-ld-schema');
+      removeHeadElement('json-ld-breadcrumb');
+
+      // Group articles by category
+      var grouped = {};
+      for (var i = 0; i < articles.length; i++) {
+        var art = articles[i];
+        if (!art || !art.category || !art.slug) continue;
+        if (!grouped[art.category]) {
+          grouped[art.category] = {
+            category: art.category,
+            label: art.categoryLabel || art.category,
+            items: []
+          };
+        }
+        grouped[art.category].items.push(art);
+      }
+
+      // Build Category Directory Badges
+      var categoryBadgesHtml = categories.length > 0
+        ? '<div class="flex flex-wrap gap-2.5">' +
+            categories.map(function(c) {
+              var catHref = sanitizeUrl(buildCategoryHref(c.category));
+              return (
+                '<a class="px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:border-blue-300 hover:bg-blue-50/60 transition-colors flex items-center gap-2 text-xs sm:text-sm font-semibold text-slate-800 cursor-pointer" data-route="category" data-category="' + escapeHtml(c.category) + '" href="' + escapeHtml(catHref) + '">' +
+                  '<span>' + escapeHtml(c.label || c.category) + '</span>' +
+                  (c.count ? '<span class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-white border border-slate-200 text-slate-500">' + Number(c.count) + '</span>' : '') +
+                '</a>'
+              );
+            }).join('') +
+          '</div>'
+        : '<p class="text-sm text-slate-500">All active category databases are listed below.</p>';
+
+      // Build Grouped Article Directory Sections
+      var groupKeys = Object.keys(grouped).sort();
+      var groupedSectionsHtml = groupKeys.map(function(catKey) {
+        var group = grouped[catKey];
+        var catHref = sanitizeUrl(buildCategoryHref(group.category));
+        var linksHtml = group.items.map(function(item) {
+          var itemHref = sanitizeUrl(buildArticleHref(item.category, item.slug));
+          return (
+            '<li>' +
+              '<a class="' + TW.sitemapItemLink + '" data-route="article" data-category="' + escapeHtml(item.category) + '" data-slug="' + escapeHtml(item.slug) + '" href="' + escapeHtml(itemHref) + '">' +
+                escapeHtml(item.title) +
+              '</a>' +
+            '</li>'
+          );
+        }).join('');
+
+        return (
+          '<section class="' + TW.sitemapCard + '">' +
+            '<div class="' + TW.sitemapGroupTitle + '">' +
+              '<a class="hover:text-blue-600 transition-colors cursor-pointer" data-route="category" data-category="' + escapeHtml(group.category) + '" href="' + escapeHtml(catHref) + '">' +
+                escapeHtml(group.label) +
+              '</a>' +
+              '<a class="text-xs font-semibold text-blue-600 hover:underline cursor-pointer" data-route="category" data-category="' + escapeHtml(group.category) + '" href="' + escapeHtml(catHref) + '">' +
+                'View category &#8594;' +
+              '</a>' +
+            '</div>' +
+            '<ul class="' + TW.sitemapGrid + '">' +
+              linksHtml +
+            '</ul>' +
+          '</section>'
+        );
+      }).join('');
+
+      var xmlSitemapUrl = sanitizeUrl(csr.apiEndpoint + '/sitemap.xml?domain=all&db=all');
+      var atomFeedUrl = sanitizeUrl(csr.apiEndpoint + '/atom.xml?domain=all&db=all');
+
+      mainEl.innerHTML =
+        '<div class="' + TW.sitemapContainer + '" data-component="sitemap-page">' +
+          '<header class="' + TW.sectionHeader + '">' +
+            '<div>' +
+              '<h1 class="' + TW.sectionTitle + '">HTML Sitemap &amp; Technical Directory</h1>' +
+              '<p class="' + TW.sectionDesc + '">Browse all categories, indexed technical guides, and XML syndication feeds.</p>' +
+            '</div>' +
+            '<div class="flex flex-wrap items-center gap-2 text-xs font-mono">' +
+              '<a class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:border-blue-300 hover:text-blue-600 transition-colors" href="' + escapeHtml(xmlSitemapUrl) + '" target="_blank" rel="noopener">sitemap.xml</a>' +
+              '<a class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:border-blue-300 hover:text-blue-600 transition-colors" href="' + escapeHtml(atomFeedUrl) + '" target="_blank" rel="noopener">atom.xml</a>' +
+            '</div>' +
+          '</header>' +
+          '<section id="sitemap-category-badges-section" class="' + TW.sitemapCard + '">' +
+            '<h2 class="' + TW.sitemapGroupTitle + '">Category Databases</h2>' +
+            categoryBadgesHtml +
+          '</section>' +
+          groupedSectionsHtml +
+        '</div>';
+    }
+
+    function renderCategoryNavPills(categories) {
+      if (Array.isArray(categories) && categories.length > 0) {
+        cachedCategories = categories;
+      }
+      if (!navEl) return;
+
+      if (csr.pageMode === 'article') {
+        navEl.innerHTML =
+          '<a class="' + TW.navLink + '" data-route="home" href="' + escapeHtml(csr.homepageUrl + '/') + '">Home</a>' +
+          '<a class="' + TW.navLink + '" data-route="sitemap" href="' + escapeHtml(buildSitemapHref()) + '">Sitemap</a>';
+        return;
+      }
+
+      var activeCat = (csr.category || '').toLowerCase();
+      var isHome = csr.pageMode === 'home' && !activeCat;
+      var isSitemap = csr.pageMode === 'sitemap';
+
+      var links = [
+        '<a class="' + (isHome ? TW.navLinkActive : TW.navLink) + '"' + (isHome ? ' aria-current="page"' : '') + ' data-route="home" href="' + escapeHtml(csr.homepageUrl + '/') + '">Home</a>',
+        '<a class="' + (isSitemap ? TW.navLinkActive : TW.navLink) + '"' + (isSitemap ? ' aria-current="page"' : '') + ' data-route="sitemap" href="' + escapeHtml(buildSitemapHref()) + '">Sitemap</a>'
+      ];
+
+      for (var i = 0; i < cachedCategories.length; i++) {
+        var c = cachedCategories[i];
+        if (!c || !c.category) continue;
+        var isCurrent = csr.pageMode === 'category' && activeCat === String(c.category).toLowerCase();
+        links.push(
+          '<a class="' + (isCurrent ? TW.navLinkActive : TW.navLink) + '"' + (isCurrent ? ' aria-current="page"' : '') + ' data-route="category" data-category="' + escapeHtml(c.category) + '" href="' + escapeHtml(sanitizeUrl(buildCategoryHref(c.category))) + '">' +
+            escapeHtml(c.label || c.category) +
+          '</a>'
+        );
+      }
+      navEl.innerHTML = links.join('');
+    }
+
+    function ensureCategoriesLoadedDeferred() {
+      // Always update active pill state immediately even before categories resolve
+      renderCategoryNavPills(cachedCategories);
+      if (csr.pageMode === 'article' || cachedCategories.length > 0 || isFetchingCategories) {
+        return;
+      }
+      isFetchingCategories = true;
+      fetch(csr.apiEndpoint + '/api/categories', {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        priority: 'low'
+      })
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(data) {
+          isFetchingCategories = false;
+          if (data && Array.isArray(data.categories)) {
+            renderCategoryNavPills(data.categories);
+          }
+        })
+        .catch(function() {
+          isFetchingCategories = false;
+        });
+    }
+
+    function renderErrorState(err) {
+      var status = (err && err.status) || 404;
+      removeHeadElement('preload-lcp-image');
+      updateSeoAndOpenGraph({
+        title: 'Content Unavailable (' + status + ') - ' + csr.blogTitle,
+        description: 'Requested technical resource could not be loaded.',
+        url: csr.canonicalUrl,
+        type: 'website',
+        image: '',
+        robots: 'noindex, nofollow'
+      });
+      removeHeadElement('json-ld-schema');
+      removeHeadElement('json-ld-breadcrumb');
+
+      mainEl.innerHTML =
+        '<section class="max-w-xl mx-auto bg-white rounded-xl border border-slate-200 p-8 text-center">' +
+          '<h1 class="text-lg font-bold text-slate-900">Content Unavailable (' + escapeHtml(status) + ')</h1>' +
+          '<p class="mt-2 text-sm text-slate-600">Unable to load data from ' + escapeHtml(csr.apiEndpoint) + '.</p>' +
+          '<a class="mt-4 inline-block px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold cursor-pointer" data-route="home" href="' + escapeHtml(csr.homepageUrl + '/') + '">Back to Home</a>' +
+        '</section>';
+    }
+
+    function renderPayloadForCurrentMode(payload, navId) {
+      if (navId !== activeNavigationId) return;
+      if (payload && Array.isArray(payload.categories) && payload.categories.length > 0) {
+        cachedCategories = payload.categories;
+      }
+      if (csr.pageMode === 'article') {
+        renderSingleArticle(payload, navId);
+      } else if (csr.pageMode === 'category') {
+        renderCategoryPage(payload);
+        ensureCategoriesLoadedDeferred();
+      } else if (csr.pageMode === 'sitemap') {
+        renderSitemapPage(payload);
+        ensureCategoriesLoadedDeferred();
+      } else {
+        renderHomepage(payload);
+        ensureCategoriesLoadedDeferred();
+      }
+    }
+
+    function navigateToRoute(newRoute, pushHistory) {
+      // Cancel any in-flight primary API request to prevent out-of-order race conditions
+      var navId = ++activeNavigationId;
+      if (activeAbortController) {
+        try { activeAbortController.abort(); } catch (e) {}
+      }
+      activeAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+
+      csr.pageMode = newRoute.pageMode;
+      csr.category = newRoute.category || '';
+      csr.slug = newRoute.slug || '';
+      csr.canonicalUrl = csr.buildCanonicalForRoute(newRoute);
+
+      setCanonicalUrl(csr.canonicalUrl);
+      renderCategoryNavPills(cachedCategories);
+
+      if (pushHistory) {
+        var relativeQuery = '/';
+        if (newRoute.pageMode === 'article') {
+          relativeQuery = '/?category=' + encodeURIComponent(newRoute.category) + '&slug=' + encodeURIComponent(newRoute.slug);
+        } else if (newRoute.pageMode === 'category') {
+          relativeQuery = '/?category=' + encodeURIComponent(newRoute.category);
+        } else if (newRoute.pageMode === 'sitemap') {
+          relativeQuery = '/?page=sitemap';
+        }
+        try {
+          window.history.pushState(newRoute, '', relativeQuery);
+        } catch (e) {}
+      }
+
+      window.scrollTo(0, 0);
+
+      var endpointUrl = csr.buildPrimaryApiUrl(newRoute);
+      var fetchOpts = {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        priority: 'high'
+      };
+      if (activeAbortController) {
+        fetchOpts.signal = activeAbortController.signal;
+      }
+
+      fetch(endpointUrl, fetchOpts)
+        .then(function(res) {
+          if (!res.ok) {
+            var err = new Error('HTTP ' + res.status);
+            err.status = res.status;
+            throw err;
+          }
+          return res.json();
+        })
+        .then(function(payload) {
+          if (navId !== activeNavigationId) return;
+          renderPayloadForCurrentMode(payload, navId);
+        })
+        .catch(function(err) {
+          if (err && err.name === 'AbortError') return;
+          if (navId !== activeNavigationId) return;
+          renderErrorState(err);
+        });
+    }
+
+    // Intercept internal navigation clicks for fast SPA/CSR transitions while preserving full crawlable hrefs
+    document.addEventListener('click', function(e) {
+      if (e.defaultPrevented || e.button !== 0) return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+
+      var anchor = e.target && e.target.closest ? e.target.closest('a[data-route]') : null;
+      if (!anchor) return;
+
+      var routeType = anchor.getAttribute('data-route');
+      if (!routeType) return;
+
+      e.preventDefault();
+      if (routeType === 'article') {
+        navigateToRoute({
+          pageMode: 'article',
+          category: anchor.getAttribute('data-category') || '',
+          slug: anchor.getAttribute('data-slug') || ''
+        }, true);
+      } else if (routeType === 'category') {
+        navigateToRoute({
+          pageMode: 'category',
+          category: anchor.getAttribute('data-category') || '',
+          slug: ''
+        }, true);
+      } else if (routeType === 'sitemap') {
+        navigateToRoute({
+          pageMode: 'sitemap',
+          category: '',
+          slug: ''
+        }, true);
+      } else {
+        navigateToRoute({
+          pageMode: 'home',
+          category: '',
+          slug: ''
+        }, true);
+      }
+    });
+
+    window.addEventListener('popstate', function() {
+      var route = csr.resolveRouteFromLocation();
+      navigateToRoute(route, false);
+    });
+
+    // Update header nav pills immediately for initial route
+    renderCategoryNavPills(cachedCategories);
+
+    // Execute initial Priority #1 Rendering Pipeline
+    if (csr.dataPromise) {
+      var initialNavId = activeNavigationId;
+      csr.dataPromise
+        .then(function(payload) {
+          if (initialNavId !== activeNavigationId) return;
+          renderPayloadForCurrentMode(payload, initialNavId);
+        })
+        .catch(function(err) {
+          if (err && err.name === 'AbortError') return;
+          if (initialNavId !== activeNavigationId) return;
+          renderErrorState(err);
+        });
+    }
+  })();
+  </script>
+  <script defer='defer' src='https://cdn.jsdelivr.net/gh/luqmanthinkpad/csrnew/gem.js'/>
+</body>
+</html>
